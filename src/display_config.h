@@ -192,7 +192,7 @@ const char* defaultConfigText() {
     "# GPS UART (Grove port: G1/G2). Swap rx/tx if no data is received.\n"
     "gps_rx=1\n"
     "gps_tx=2\n"
-    "gps_baud=115200\n"
+    "gps_baud=9600\n"
     "\n"
     "# External LCD wiring (Cardputer ADV GPIO numbers).\n"
     "# DIN and CLK share the microSD bus.\n"
@@ -248,6 +248,85 @@ void loadConfigFromSD() {
   }
   SD.end();
   sdSPI.end();
+#endif
+}
+
+/*    Return config text with "key=value" set: replaces the first active line
+*     for that key (comments and other lines are kept), or appends it.
+*/
+String setConfigKey(const String &text, const char* key, const String &value) {
+  String out = "";
+  bool done = false;
+  int start = 0;
+  while (start < (int)text.length()) {
+    int end = text.indexOf('\n', start);
+    if (end < 0) end = text.length();
+    String line = text.substring(start, end);
+    start = end + 1;
+    if (!done) {
+      String body = line;
+      int hash = body.indexOf('#');
+      if (hash >= 0) body = body.substring(0, hash);
+      int eq = body.indexOf('=');
+      if (eq > 0) {
+        String k = body.substring(0, eq);
+        k.trim(); k.toLowerCase();
+        if (k == key) {
+          line = String(key) + "=" + value;
+          done = true;
+        }
+      }
+    }
+    out += line;
+    out += "\n";
+  }
+  if (!done) out += String(key) + "=" + value + "\n";
+  return out;
+}
+
+/*    Save the current GPS RX/TX pins and baud to /cpGpsInfo.conf, keeping
+*     every other setting in the file. In external mode the LCD gives the
+*     shared CLK/DIN lines back to the SD card for the write, then takes
+*     them again. Returns true on success.
+*/
+bool saveGpsSettingsToSD() {
+#ifndef HOST_PREVIEW
+  if (extDisplay) {
+    extLcd.waitDisplay();
+    extLcd.releaseBus();
+  }
+  bool ok = false;
+  SPIClass sdSPI(FSPI);
+  sdSPI.begin(SD_PIN_SCLK, SD_PIN_MISO, SD_PIN_MOSI, SD_PIN_CS);
+  if (SD.begin(SD_PIN_CS, sdSPI, 20000000)) {
+    String text;
+    if (SD.exists(CONFIG_PATH)) {
+      File f = SD.open(CONFIG_PATH, FILE_READ);
+      if (f) { text = f.readString(); f.close(); }
+    } else {
+      text = setConfigKey(defaultConfigText(), "display",
+                          appCfg.display == DISPLAY_EXTERNAL ? "external" : "internal");
+    }
+    text = setConfigKey(text, "gps_rx",   String(gpsRxPin));
+    text = setConfigKey(text, "gps_tx",   String(gpsTxPin));
+    text = setConfigKey(text, "gps_baud", String(gpsBaud));
+    File f = SD.open(CONFIG_PATH, FILE_WRITE);   // truncates
+    if (f) {
+      ok = (f.print(text) == text.length());
+      f.close();
+    }
+    SD.end();
+  }
+  sdSPI.end();
+  if (extDisplay) {
+    pinMode(SD_PIN_CS, OUTPUT);
+    digitalWrite(SD_PIN_CS, HIGH);
+    extLcd.initBus();
+  }
+  Serial.printf("[cfg] Save GPS settings: %s\n", ok ? "OK" : "FAILED");
+  return ok;
+#else
+  return true;
 #endif
 }
 

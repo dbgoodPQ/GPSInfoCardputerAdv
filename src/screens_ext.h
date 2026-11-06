@@ -862,7 +862,7 @@ void drawConfigExt() {
   int x = 24, y = 22;
   xText("Configurations:", x, y, TFT_GREEN, F_BODY);                       y += 22;
   xText("Nav: [Up/Dow]. Val: [0-9].", x, y, TFT_WHITE, F_BODY);            y += 18;
-  xText("Exit: [c]. Save: [ok].", x, y, TFT_WHITE, F_BODY);                y += 30;
+  xText("Exit: [c]. Save to SD: [ok].", x, y, TFT_WHITE, F_BODY);          y += 30;
   snprintf(buf, sizeof(buf), "RX pin (act:%d): %s %s", gpsRxPin, configsTmp[0].c_str(), configsMenuSel == 0 ? "<" : "");
   xText(buf, x, y, configsMenuSel == 0 ? TFT_GREEN : TFT_WHITE, F_BODY);  y += 22;
   snprintf(buf, sizeof(buf), "TX pin (act:%d): %s %s", gpsTxPin, configsTmp[1].c_str(), configsMenuSel == 1 ? "<" : "");
@@ -879,4 +879,10 @@ void drawSentExt() {
   int w = 140, h = 44;
   popupBox((screenW - w) / 2, (screenH - h) / 2, w, h);
   xText("Sent!", screenW / 2, screenH / 2, TFT_GREEN, F_MED, MC_DATUM);
+}
+
+void drawToastExt(const char* msg) {
+  int w = xTextW(msg, F_MED) + 36, h = 44;
+  popupBox((screenW - w) / 2, (screenH - h) / 2, w, h);
+  xText(msg, screenW / 2, screenH / 2, TFT_GREEN, F_MED, MC_DATUM);
 }

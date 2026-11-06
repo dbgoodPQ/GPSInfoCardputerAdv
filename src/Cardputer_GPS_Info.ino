@@ -143,7 +143,7 @@ String configsTmp[3] = {"", "", ""};  // 0 Rx, 1 Tx, 2 Baud.
 // (Cap LoRa-1262 users: gps_rx=15, gps_tx=13 in the config file.)
 int gpsRxPin = 1;  // Cardputer ADV Rx pin <- GPS Tx pin.
 int gpsTxPin = 2;  // Cardputer ADV Tx pin <- GPS Rx pin.
-int gpsBaud = 115200;
+int gpsBaud = 9600;
 
 // ---- Waypoint navigation ----
 bool waypointSet = false;        // True when a target waypoint is active.
@@ -2548,6 +2548,23 @@ void drawConfig(bool should_I) {
     updateScreen(true); // Forced update.
 }
 
+/*    Short status message box over the current screen.
+*/
+void showToast(const char* msg) {
+  if (extDisplay) {
+    drawToastExt(msg);
+  } else {
+    frameBuf.fillRect(60, 55, 120, 25, TFT_BLACK);
+    frameBuf.drawRect(60, 55, 120, 25, TFT_GREEN);
+    frameBuf.setFont(&fonts::Font0);
+    frameBuf.setTextSize(1);
+    frameBuf.setTextColor(TFT_GREEN);
+    frameBuf.setCursor(120 - (int)strlen(msg) * 3, 64);
+    frameBuf.print(msg);
+  }
+  pushFrame();
+}
+
 /*    Send the current frame over USB serial as RGB565 hex rows
       (captured by utils/serial_screenshot.py). Uses the active resolution.
 */
@@ -2730,6 +2747,11 @@ void handleKeys() {
             gpsBaud = configsTmp[2].toInt();
           configsTmp[0] = configsTmp[1] = configsTmp[2] = "";
           configsMenu = false;
+          // Persist GPS pins/baud to /cpGpsInfo.conf on the SD card.
+          bool saved = saveGpsSettingsToSD();
+          updateScreen(true);
+          showToast(saved ? "Saved to SD" : "SD save failed");
+          delay(1000);
           updateScreen(true);
           return;
         }

@@ -13,7 +13,7 @@ display=external
 # Cap LoRa-1262 users: gps_rx=15, gps_tx=13
 gps_rx=1
 gps_tx=2
-gps_baud=115200
+gps_baud=9600
 
 # External LCD wiring (Cardputer ADV GPIO numbers).
 # DIN and CLK share the microSD bus.
