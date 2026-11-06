@@ -4,10 +4,10 @@
 #include <TinyGPSPlus.h>
 #include <time.h>
 
-#define APP_VERSION "2.0.1"
+#define APP_VERSION "2.1.0-ext"
 
 
-HardwareSerial GPS_Serial(2); // Use UART2 for GPS (Cap LoRa-1262 ATGM336H).
+HardwareSerial GPS_Serial(2); // Use UART2 for GPS (pins set in cpGpsInfo.conf).
 TinyGPSPlus gps;
 
 struct SatData {
@@ -139,9 +139,11 @@ bool configsMenu = false;
 int configsMenuSel = 0;
 String configsTmp[3] = {"", "", ""};  // 0 Rx, 1 Tx, 2 Baud.
 
-int gpsRxPin = 15; // Cardputer ADV Rx pin <- GPS Tx pin (Cap LoRa-1262 EXT header).
-int gpsTxPin = 13; // Cardputer ADV Tx pin <- GPS Rx pin (Cap LoRa-1262 EXT header).
-int gpsBaud = 115200; // ATGM336H default baud rate.
+// Defaults: GPS module on the Grove port (G1/G2). Overridden by cpGpsInfo.conf.
+// (Cap LoRa-1262 users: gps_rx=15, gps_tx=13 in the config file.)
+int gpsRxPin = 1;  // Cardputer ADV Rx pin <- GPS Tx pin.
+int gpsTxPin = 2;  // Cardputer ADV Tx pin <- GPS Rx pin.
+int gpsBaud = 9600;
 
 // ---- Waypoint navigation ----
 bool waypointSet = false;        // True when a target waypoint is active.
@@ -156,12 +158,17 @@ GPSState gpsSerialState = GPS_OFF;
 const unsigned long GPS_TIMEOUT = 1000;
 unsigned long lastValidGpsMillis = 0;
 
-// Cardputer (1, 1.1, ADV) Display.
-const int screenW = 240;
-const int screenH = 135;
+// Output resolution. 240x135 on the built-in display; set at boot from the
+// selected display (320x240 on the external Waveshare 2.0" LCD).
+int screenW = 240;
+int screenH = 135;
+#define SCREEN_MAX_W 320
 
-// Off-screen frame buffer for flicker-free rendering.
-M5Canvas frameBuf(&M5Cardputer.Display);
+// Off-screen frame buffer for flicker-free rendering (pushed to gfxOut).
+M5Canvas frameBuf;
+
+// Config file, display selection, external LCD driver.
+#include "display_config.h"
 
 // ==================================================================
 //  Utility functions
@@ -374,7 +381,7 @@ void serialGPSRead() {
     gpsSerialState = GPS_ERR;
   }
   if (gpsSerialState != prevState) {
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
   }
 }
 
@@ -1853,7 +1860,11 @@ void drawScreenGpsMap() {
                   latMin, latMax, lonMin, lonMax, latRange, lonRange);
 
   // Draw cities.
-  frameBuf.setTextSize(1);
+  // Internal: 6x8 font. External: 16 px proportional font, larger dots.
+  uiFontSmall();
+  if (extDisplay) frameBuf.setFont(&fonts::Font2);
+  const int cityR = (extDisplay && z >= 3) ? 2 : 1;
+  const int cityDy = extDisplay ? 8 : 3;
   for (int i = 0; i < NUM_CITIES; i++) {
     MapCity city;
     memcpy_P(&city, &cityList[i], sizeof(MapCity));
@@ -1862,13 +1873,14 @@ void drawScreenGpsMap() {
     int cx = (int)((clon - lonMin) / lonRange * screenW);
     int cy = (int)((latMax - clat) / latRange * screenH);
     if (cx >= 1 && cx < screenW - 1 && cy >= 1 && cy < screenH - 1) {
-      frameBuf.fillCircle(cx, cy, 1, TFT_YELLOW);
+      frameBuf.fillCircle(cx, cy, cityR, TFT_YELLOW);
       if (z >= 4) {
         frameBuf.setTextColor(TFT_WHITE);
-        int tx = cx + 3;
-        if (tx + (int)strlen(city.name) * 6 > screenW)
-          tx = cx - (int)strlen(city.name) * 6 - 2;
-        frameBuf.setCursor(tx, cy - 3);
+        int nameW = frameBuf.textWidth(city.name);
+        int tx = cx + cityR + 2;
+        if (tx + nameW > screenW)
+          tx = cx - nameW - cityR - 1;
+        frameBuf.setCursor(tx, cy - cityDy);
         frameBuf.print(city.name);
       }
     }
@@ -1878,30 +1890,31 @@ void drawScreenGpsMap() {
   if (hasFix) {
     int gx = (int)((cLon - lonMin) / lonRange * screenW);
     int gy = (int)((latMax - cLat) / latRange * screenH);
-    frameBuf.drawLine(gx - 6, gy, gx + 6, gy, TFT_RED);
-    frameBuf.drawLine(gx, gy - 6, gx, gy + 6, TFT_RED);
-    frameBuf.fillCircle(gx, gy, 2, TFT_RED);
+    int arm = extDisplay ? 9 : 6;
+    frameBuf.drawLine(gx - arm, gy, gx + arm, gy, TFT_RED);
+    frameBuf.drawLine(gx, gy - arm, gx, gy + arm, TFT_RED);
+    frameBuf.fillCircle(gx, gy, extDisplay ? 3 : 2, TFT_RED);
   }
 
   // Zoom indicator.
-  frameBuf.setTextSize(1);
+  uiFontSmall();
+  const int infoY = screenH - (extDisplay ? 18 : 10);
   frameBuf.setTextColor(TFT_DARKGREY);
   char zBuf[20];
   snprintf(zBuf, sizeof(zBuf), "z%d [z+/x-]", z);
-  frameBuf.setCursor(2, screenH - 10);
+  if (extDisplay) frameBuf.fillRect(0, infoY - 1, frameBuf.textWidth(zBuf) + 4, 18, TFT_BLACK);
+  frameBuf.setCursor(2, infoY);
   frameBuf.print(zBuf);
 
   // Position info.
-  if (hasFix) {
-    char posBuf[20];
-    snprintf(posBuf, sizeof(posBuf), "%.2f,%.2f", cLat, cLon);
-    int pw = strlen(posBuf) * 6;
-    frameBuf.setCursor(screenW - pw - 2, screenH - 10);
-    frameBuf.print(posBuf);
-  } else {
-    frameBuf.setCursor(screenW - 42, screenH - 10);
-    frameBuf.print("No Fix");
-  }
+  char posBuf[20];
+  if (hasFix) snprintf(posBuf, sizeof(posBuf), "%.2f,%.2f", cLat, cLon);
+  else        snprintf(posBuf, sizeof(posBuf), "No Fix");
+  int pw = frameBuf.textWidth(posBuf);
+  int pad = (!hasFix && !extDisplay) ? 6 : 2;   // keeps the original 240x135 placement
+  if (extDisplay) frameBuf.fillRect(screenW - pw - pad - 2, infoY - 1, pw + pad + 2, 18, TFT_BLACK);
+  frameBuf.setCursor(screenW - pw - pad, infoY);
+  frameBuf.print(posBuf);
 }
 
 // ------------------------------------------------------------------
@@ -2034,7 +2047,9 @@ void drawScreen3DGlobe() {
 
   const int gcx = screenW / 2;
   const int gcy = screenH / 2;
-  const float ER = 32.0f;
+  // Earth radius in pixels: 32 at 135 px tall, scaled to the display height.
+  const float ER = 32.0f * (float)min(screenW, screenH) / 135.0f;
+  const int dotPlus = extDisplay ? 1 : 0;   // slightly larger marks at 320x240
 
   int camLon100 = (int)(camLonDeg * 100) % 36000;
   if (camLon100 < -18000) camLon100 += 36000;
@@ -2091,8 +2106,8 @@ void drawScreen3DGlobe() {
     int uLonCD = (int)(gps.location.lng() * 100);
     GLOBE_PROJ(uLatCD, uLonCD, 1.0f, ux, uy, uz);
     if (uz > 0) {
-      frameBuf.fillCircle(ux, uy, 3, TFT_RED);
-      frameBuf.drawCircle(ux, uy, 4, 0xF800);
+      frameBuf.fillCircle(ux, uy, 3 + dotPlus, TFT_RED);
+      frameBuf.drawCircle(ux, uy, 4 + dotPlus, 0xF800);
     }
   }
 
@@ -2149,18 +2164,22 @@ void drawScreen3DGlobe() {
 
       // Satellite dot (bigger for strong signals)
       if (spz > 0 && (unsigned)spx < (unsigned)screenW && (unsigned)spy < (unsigned)screenH) {
-        int r = (sat.snr > 30) ? 3 : (sat.snr > 15) ? 2 : 1;
+        int r = ((sat.snr > 30) ? 3 : (sat.snr > 15) ? 2 : 1) + dotPlus;
         frameBuf.fillCircle(spx, spy, r, col);
       }
     }
   }
 
   // --- Legend ---
-  frameBuf.setTextSize(1);
-  frameBuf.setTextColor(TFT_YELLOW); frameBuf.setCursor(2, screenH-28); frameBuf.print("GPS");
-  frameBuf.setTextColor(TFT_CYAN);   frameBuf.setCursor(2, screenH-20); frameBuf.print("GLN");
-  frameBuf.setTextColor(0x54BF);      frameBuf.setCursor(2, screenH-12); frameBuf.print("GAL");
-  frameBuf.setTextColor(TFT_ORANGE); frameBuf.setCursor(26,screenH-28); frameBuf.print("BDS");
+  // Internal: 8 px rows of 6x8 text. External: 16 px rows of 8x16 text.
+  uiFontSmall();
+  const int lh = extDisplay ? 16 : 8;
+  const int legY = screenH - lh * 3 - 4;
+  const int col2 = extDisplay ? 34 : 26;
+  frameBuf.setTextColor(TFT_YELLOW); frameBuf.setCursor(2, legY);          frameBuf.print("GPS");
+  frameBuf.setTextColor(TFT_CYAN);   frameBuf.setCursor(2, legY + lh);     frameBuf.print("GLN");
+  frameBuf.setTextColor(0x54BF);      frameBuf.setCursor(2, legY + 2 * lh); frameBuf.print("GAL");
+  frameBuf.setTextColor(TFT_ORANGE); frameBuf.setCursor(col2, legY);       frameBuf.print("BDS");
 
   // Sat count
   int visCnt = 0;
@@ -2169,7 +2188,7 @@ void drawScreen3DGlobe() {
   char buf[16];
   frameBuf.setTextColor(TFT_DARKGREY);
   snprintf(buf, sizeof(buf), "%d sats", visCnt);
-  frameBuf.setCursor(screenW - (int)strlen(buf) * 6 - 2, 2);
+  frameBuf.setCursor(screenW - frameBuf.textWidth(buf) - 2, 2);
   frameBuf.print(buf);
 }
 
@@ -2380,6 +2399,9 @@ void drawScreenWaypoint() {
   frameBuf.print("[w] edit [r] clear");
 }
 
+// Native 320x240 layouts for the external display.
+#include "screens_ext.h"
+
 // ==================================================================
 //  Screen dispatch and update
 // ==================================================================
@@ -2401,6 +2423,12 @@ void updateScreen(bool force = false) {
     if (openMenu || configsMenu) return;
     // Clear screen for clean redraw.
     frameBuf.fillScreen(TFT_BLACK);
+    // External display: native 320x240 layouts.
+    if (extDisplay) {
+      drawCurrentScreenExt();
+      pushFrame();
+      return;
+    }
     // Dispatch to current screen.
     switch (currentScreen) {
       case SCR_MAIN:
@@ -2424,7 +2452,7 @@ void updateScreen(bool force = false) {
       case SCR_WAYPOINT:    drawScreenWaypoint();   break;
       default: break;
     }
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
   }
 }
 
@@ -2498,6 +2526,7 @@ void drawConfig(bool should_I) {
       gpsSerial = false;
       initGPSSerial(false);
     }
+    if (extDisplay) { drawConfigExt(); return; }
     frameBuf.fillRect(10, 10, screenW-20, screenH-20, TFT_BLACK);
     frameBuf.drawRect(12, 12, screenW-24, screenH-24, TFT_GREEN);
     frameBuf.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -2519,17 +2548,34 @@ void drawConfig(bool should_I) {
     updateScreen(true); // Forced update.
 }
 
-/*    Save screenshot as 24-bit BMP to SD card.
-      Returns true on success.
+/*    Short status message box over the current screen.
+*/
+void showToast(const char* msg) {
+  if (extDisplay) {
+    drawToastExt(msg);
+  } else {
+    frameBuf.fillRect(60, 55, 120, 25, TFT_BLACK);
+    frameBuf.drawRect(60, 55, 120, 25, TFT_GREEN);
+    frameBuf.setFont(&fonts::Font0);
+    frameBuf.setTextSize(1);
+    frameBuf.setTextColor(TFT_GREEN);
+    frameBuf.setCursor(120 - (int)strlen(msg) * 3, 64);
+    frameBuf.print(msg);
+  }
+  pushFrame();
+}
+
+/*    Send the current frame over USB serial as RGB565 hex rows
+      (captured by utils/serial_screenshot.py). Uses the active resolution.
 */
 void sendScreenshotSerial() {
-  const int W = 240, H = 135;
+  const int W = screenW, H = screenH;
   Serial.flush();
   delay(50);
   Serial.println("SCREENSHOT_START");
   Serial.printf("%d %d\n", W, H);
   Serial.flush();
-  char hexRow[W * 4 + 1];
+  static char hexRow[SCREEN_MAX_W * 4 + 1];
   for (int y = 0; y < H; y++) {
     for (int x = 0; x < W; x++) {
       uint16_t c = (uint16_t)frameBuf.readPixel(x, y);
@@ -2559,6 +2605,7 @@ void drawInfo(bool should_I) {
       "/Cardputer-GPS-Info"
     };
     int count = sizeof(helpText) / sizeof(helpText[0]);
+    if (extDisplay) { drawInfoExt(); return; }
     frameBuf.fillRect(18, 18, 204, 99, TFT_BLACK);
     frameBuf.drawRect(20, 20, 200, 95, TFT_GREEN);
     frameBuf.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -2597,6 +2644,7 @@ void drawHelp(bool should_I) {
       "[w] Waypoint entry (on WP screen)."
     };
     int count = sizeof(helpText) / sizeof(helpText[0]);
+    if (extDisplay) { drawHelpExt(helpText, count); return; }
     frameBuf.fillRect(4, 4, screenW-8, screenH-8, TFT_BLACK);
     frameBuf.drawRect(6, 6, screenW-12, screenH-12, TFT_GREEN);
     frameBuf.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -2699,11 +2747,16 @@ void handleKeys() {
             gpsBaud = configsTmp[2].toInt();
           configsTmp[0] = configsTmp[1] = configsTmp[2] = "";
           configsMenu = false;
+          // Persist GPS pins/baud to /cpGpsInfo.conf on the SD card.
+          bool saved = saveGpsSettingsToSD();
+          updateScreen(true);
+          showToast(saved ? "Saved to SD" : "SD save failed");
+          delay(1000);
           updateScreen(true);
           return;
         }
         drawConfig(true);
-        frameBuf.pushSprite(0, 0);
+        pushFrame();
       }
     }
   }
@@ -2717,28 +2770,28 @@ void handleControls() {
     gpsSerial = !gpsSerial;
     initGPSSerial(gpsSerial);
     gpsSerialState = gpsSerial ? GPS_ON : GPS_OFF;
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
     delay(300);
   }
   // Handle C key for Config.
   if (M5Cardputer.Keyboard.isKeyPressed('c')) {
     configsMenu = !configsMenu; // Invert status.
     drawConfig(configsMenu);
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
     delay(300); // Debounce.
   }
   // Handle H key for Help.
   if (M5Cardputer.Keyboard.isKeyPressed('h')) {
     helpMenu = !helpMenu; // Invert status.
     drawHelp(helpMenu);
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
     delay(300); // Debounce.
   }
   // Handle I key for Info.
   if (M5Cardputer.Keyboard.isKeyPressed('i')) {
     infoMenu = !infoMenu; // Invert status.
     drawInfo(infoMenu);
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
     delay(300); // Debounce.
   }
   // Handle P key to hide id from plot.
@@ -2756,7 +2809,7 @@ void handleControls() {
     nmeaSerial = false;
     satListSerial = !satListSerial; // Invert status.
     initDebugSerial(satListSerial);
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
     delay(300); // Debounce.
   }
   // Handle N key for serial NMEA sentences dump.
@@ -2764,7 +2817,7 @@ void handleControls() {
     satListSerial = false;
     nmeaSerial = !nmeaSerial; // Invert status.
     initDebugSerial(nmeaSerial);
-    frameBuf.pushSprite(0, 0);
+    pushFrame();
     delay(300); // Debounce.
   }
   // Handle W key for waypoint entry (only on waypoint screen).
@@ -2810,7 +2863,7 @@ void handleControls() {
     if (M5Cardputer.Keyboard.isKeyPressed('.')) {
       autoSlideshow = !autoSlideshow;
       lastSlideChange = millis();
-      frameBuf.pushSprite(0, 0);
+      pushFrame();
       delay(300);
     }
     // Direct screen jump with number keys 0-9.
@@ -2842,12 +2895,16 @@ void handleControls() {
     // Enter key: send screenshot over serial.
     if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
       sendScreenshotSerial();
-      frameBuf.fillRect(70, 55, 100, 25, TFT_BLACK);
-      frameBuf.drawRect(70, 55, 100, 25, TFT_GREEN);
-      frameBuf.setTextColor(TFT_GREEN);
-      frameBuf.setCursor(82, 62);
-      frameBuf.print("Sent!");
-      frameBuf.pushSprite(0, 0);
+      if (extDisplay) {
+        drawSentExt();
+      } else {
+        frameBuf.fillRect(70, 55, 100, 25, TFT_BLACK);
+        frameBuf.drawRect(70, 55, 100, 25, TFT_GREEN);
+        frameBuf.setTextColor(TFT_GREEN);
+        frameBuf.setCursor(82, 62);
+        frameBuf.print("Sent!");
+      }
+      pushFrame();
       delay(1000);
       updateScreen(true);
     }
@@ -2864,9 +2921,11 @@ void setup() {
   auto cfg = M5.config();
   M5Cardputer.begin(cfg); // Init Cardputer ADV.
   Serial.begin(115200);   // Init USB CDC for screenshot transfer.
-  M5Cardputer.Display.setRotation(1);
-  M5Cardputer.Display.setBrightness(128); // Set brightness 0-255.
-  frameBuf.createSprite(240, 135);
+  // Read /cpGpsInfo.conf (display mode, GPS pins/baud, LCD wiring) from SD,
+  // then start the selected display and allocate the frame buffer at its
+  // native resolution (240x135 built-in, 320x240 external).
+  loadConfigFromSD();
+  initDisplays();
   lastValidGpsMillis = millis();
   lastSlideChange = millis();
   // Init NMEA buffer.
