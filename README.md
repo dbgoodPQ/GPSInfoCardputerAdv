@@ -16,7 +16,63 @@ It reads GPS data via UART and displays location, speed, course, satellite visib
 <img src="scr_0024.bmp" alt="Screenshot 10" width="30%">
 <img src="scr_0003.bmp" alt="Screenshot 11" width="30%">
 
+## External display mode (Waveshare 2.0" LCD, 320x240)
+
+This fork can send all output to an external **Waveshare 2.0inch LCD Module** (ST7789VW, 240x320 IPS) instead of the built-in 240x135 screen. The mode is chosen at boot from a config file on the microSD card.
+
+Every screen and popup has its own layout drawn natively at **320x240**: nothing is scaled or zoomed. Text uses bitmap fonts at their real pixel size (8x16 monospace for tables, 16 and 26 px proportional, an 18 pt sans for coordinates, 48/75 px seven-segment digits for the clock and speed), so text and graphics stay sharp. The built-in display is switched off while the external one is in use. Internal mode output is unchanged from upstream.
+
+<img src="docs/external/ext_00.png" alt="Main" width="32%"> <img src="docs/external/ext_04.png" alt="Dashboard" width="32%"> <img src="docs/external/ext_02.png" alt="Signal" width="32%">
+<img src="docs/external/ext_05.png" alt="Coordinates" width="32%"> <img src="docs/external/ext_12.png" alt="Clock" width="32%"> <img src="docs/external/ext_15.png" alt="Waypoint" width="32%">
+
+*(Previews rendered off-device from sample NMEA data with the same graphics library.)*
+
+### Wiring
+
+| Waveshare pin | Cardputer ADV | Notes |
+|---|---|---|
+| VCC | 3V3 | set the module's voltage selector to 3.3 V |
+| GND | GND | |
+| DIN | G14 | shared with the microSD card (MOSI) |
+| CLK | G40 | shared with the microSD card (SCLK) |
+| CS  | G5  | |
+| DC  | G6  | |
+| RST | G3  | |
+| BL  | G4  | backlight, PWM brightness |
+
+GPS module on the Grove port: GPS TX → G1, GPS RX → G2 (defaults `gps_rx=1`, `gps_tx=2`).
+
+How it works: the built-in display stays on its own bus (SPI3) and the external LCD runs on SPI2. At boot the config file is read from the SD card first. Then the card is released and its CS (G12) is held high, so the LCD can use the shared CLK/DIN lines. The SD card is not used after boot.
+
+### Config file
+
+Copy [`cpGpsInfo.conf.example`](cpGpsInfo.conf.example) to the root of the microSD card as `cpGpsInfo.conf`. If the card has no config file, a default one (`display=internal`) is created on first boot. Without an SD card the built-in display and default pins are used.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `display` | `internal` | `internal` or `external` |
+| `gps_rx`, `gps_tx`, `gps_baud` | `1`, `2`, `115200` | GPS UART |
+| `ext_pin_mosi/sclk/cs/dc/rst/bl` | `14/40/5/6/3/4` | external LCD wiring |
+| `ext_rotation` | `1` | `1` landscape, `3` landscape upside down |
+| `ext_invert` | `1` | set `0` if colours look inverted |
+| `ext_bgr` | `0` | set `1` if red and blue are swapped |
+| `ext_brightness` | `200` | 0–255 |
+| `ext_spi_mhz` | `40` | lower (e.g. 20) for long jumper wires |
+| `int_brightness` | `128` | built-in screen brightness |
+
+External pins that clash with the built-in display (G33–G38), the internal I2C bus (G8/G9) or the GPS pins are rejected, and the built-in display is used instead. The `[c]` popup shows which display is active. The `[c]` menu still changes GPS pins/baud for the current session only.
+
+Screenshots over USB serial (`[Enter]`) use the active resolution; `utils/serial_screenshot.py` handles 320x240 without changes.
+
+Memory: the 320x240 16-bit frame buffer needs ~150 KB of contiguous RAM. If it can't be allocated, the firmware falls back to an 8-bit colour buffer and logs it on USB serial.
+
 ## Changelog
+
+### 2.1.0-ext (fork: dbgoodPQ/GPSInfoCardputerAdv)
+- External display mode for the Waveshare 2.0" LCD at native 320x240, with dedicated layouts for all 16 screens and popups
+- Boot config file `/cpGpsInfo.conf` on microSD: display selection, GPS pins/baud, LCD wiring and options
+- Default GPS pins moved to the Grove port (G1/G2)
+- Screenshots over serial follow the active resolution
 
 ### 2.0.0
 - Major rewrite with 15 switchable screens and off-screen frame buffer rendering
@@ -146,6 +202,7 @@ pio run -e m5cardputer-adv -t upload
 ### Arduino IDE
 
 Open `Cardputer_GPS_Info.ino` (v1.3.0) directly in Arduino IDE. Requires the M5Cardputer and TinyGPSPlus libraries.
+The external display mode is only in the `src/` (PlatformIO) version; to use it from Arduino IDE, open `src/Cardputer_GPS_Info.ino` with its `display_config.h`, `screens_ext.h` and `map_data.h`.
 
 ## NMEA sentences to USB serial `[n]`
 

@@ -1,0 +1,39 @@
+# Cardputer ADV GPS Info - configuration (read once at boot)
+#
+# Copy this file to the root of the microSD card as:  cpGpsInfo.conf
+# If the card has no config file, the firmware writes a default one
+# (display=internal) on first boot.
+#
+# Output display:
+#   internal = built-in 240x135 screen
+#   external = Waveshare 2.0inch LCD (ST7789, used at 320x240)
+display=external
+
+# GPS UART (Grove port: G1/G2). Swap rx/tx if no data is received.
+# Cap LoRa-1262 users: gps_rx=15, gps_tx=13
+gps_rx=1
+gps_tx=2
+gps_baud=115200
+
+# External LCD wiring (Cardputer ADV GPIO numbers).
+# DIN and CLK share the microSD bus.
+ext_pin_mosi=14
+ext_pin_sclk=40
+ext_pin_cs=5
+ext_pin_dc=6
+ext_pin_rst=3
+ext_pin_bl=4
+
+# External LCD options.
+# ext_rotation: 1 = landscape, 3 = landscape upside down
+ext_rotation=1
+# Colours look like a photo negative?  -> ext_invert=0
+ext_invert=1
+# Red and blue swapped?                -> ext_bgr=1
+ext_bgr=0
+ext_brightness=200
+# Lower this (e.g. 20) if the image shows noise on long jumper wires.
+ext_spi_mhz=40
+
+# Built-in screen brightness (internal mode).
+int_brightness=128
